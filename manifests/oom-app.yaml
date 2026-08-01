@@ -1,0 +1,35 @@
+# Seeded failure: container deliberately allocates more memory than its
+# limit allows -> kubelet OOMKills it, repeatedly.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oom-app
+  namespace: default
+  labels:
+    app: oom-app
+    sre-copilot-demo: "true"
+    failure-mode: oom
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oom-app
+  template:
+    metadata:
+      labels:
+        app: oom-app
+        sre-copilot-demo: "true"
+        failure-mode: oom
+    spec:
+      containers:
+        - name: app
+          image: polinux/stress
+          command: ["stress"]
+          args: ["--vm", "1", "--vm-bytes", "200M", "--vm-hang", "1"]  # stress wants decimal (M), not binary (Mi) suffixes
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            limits:
+              cpu: "100m"
+              memory: "50Mi"  # far below what --vm-bytes allocates, by design

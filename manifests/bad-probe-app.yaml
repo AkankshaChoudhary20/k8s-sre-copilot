@@ -1,0 +1,52 @@
+# Seeded failure: the app itself is healthy, but readinessProbe checks a
+# path nothing serves -> container runs fine yet never becomes Ready.
+# livenessProbe is correct on purpose, so the container doesn't crashloop —
+# this isolates the "bad probe" failure mode from "bad app" ones.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bad-probe-app
+  namespace: default
+  labels:
+    app: bad-probe-app
+    sre-copilot-demo: "true"
+    failure-mode: bad-probe
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bad-probe-app
+  template:
+    metadata:
+      labels:
+        app: bad-probe-app
+        sre-copilot-demo: "true"
+        failure-mode: bad-probe
+    spec:
+      containers:
+        - name: app
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "64Mi"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz  # nginx has nothing at this path -> always 404 -> NotReady
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          # no restrictive securityContext here: nginx's entrypoint needs CAP_CHOWN
+          # to prep /var/cache/nginx on startup — dropping it breaks the app itself,
+          # which would mask the one failure mode this manifest is meant to isolate.

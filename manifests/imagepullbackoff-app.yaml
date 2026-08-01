@@ -1,0 +1,37 @@
+# Seeded failure: image tag does not exist -> ErrImagePull -> ImagePullBackOff.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: imagepullbackoff-app
+  namespace: default
+  labels:
+    app: imagepullbackoff-app
+    sre-copilot-demo: "true"
+    failure-mode: imagepullbackoff
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: imagepullbackoff-app
+  template:
+    metadata:
+      labels:
+        app: imagepullbackoff-app
+        sre-copilot-demo: "true"
+        failure-mode: imagepullbackoff
+    spec:
+      containers:
+        - name: app
+          image: nginx:this-tag-does-not-exist-v99
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            limits:
+              cpu: "50m"
+              memory: "32Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
