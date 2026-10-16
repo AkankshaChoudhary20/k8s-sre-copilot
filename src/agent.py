@@ -8,7 +8,6 @@ against a real tool function, and feed the result back as an observation.
 """
 
 import json
-import re
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -50,15 +49,32 @@ doesn't support a conclusion, say what's still unknown instead of guessing.
 
 
 def _extract_json(text: str) -> dict:
-    text = text.strip()
-    fence_match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
-    if fence_match:
-        text = fence_match.group(1)
-    else:
-        brace_match = re.search(r"\{.*\}", text, re.DOTALL)
-        if brace_match:
-            text = brace_match.group(0)
-    return json.loads(text)
+    decoder = json.JSONDecoder()
+    # Decode from each opening brace; unlike a greedy regex this understands
+    # nested objects and braces inside strings. Reject ambiguous envelopes.
+    candidates = []
+    position = 0
+    while position < len(text):
+        start = text.find('{', position)
+        if start < 0:
+            break
+        try:
+            value, length = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            position = start + 1
+            continue
+        if isinstance(value, dict) and ('action' in value or 'final_answer' in value):
+            candidates.append(value)
+        position = start + length
+    if len(candidates) != 1:
+        raise ValueError('Expected exactly one action or final-answer object')
+    parsed = candidates[0]
+    if 'action' in parsed and 'final_answer' in parsed:
+        raise ValueError('A response cannot both call a tool and finish')
+    if 'action' in parsed and (not isinstance(parsed['action'], str)
+                              or not isinstance(parsed.get('args', {}), dict)):
+        raise ValueError('Tool actions need a string name and object arguments')
+    return parsed
 
 
 def _format_final_answer(answer) -> str:
@@ -98,7 +114,7 @@ def run_agent(llm: OllamaClient, tools: dict[str, Tool], task_intro: str, task: 
 
         try:
             parsed = _extract_json(reply)
-        except (json.JSONDecodeError, AttributeError):
+        except (ValueError, AttributeError):
             if verbose:
                 snippet = reply.replace("\n", " ")[:200]
                 print(f"  [iteration {i}] unparseable response, retrying... raw: {snippet!r}")
@@ -112,6 +128,10 @@ def run_agent(llm: OllamaClient, tools: dict[str, Tool], task_intro: str, task: 
             continue
 
         if "final_answer" in parsed:
+            answer = _format_final_answer(parsed["final_answer"]).strip()
+            if not isinstance(parsed["final_answer"], (str, dict)) or not answer or not answer.strip('.… '):
+                messages.append({'role': 'user', 'content': 'Provide a substantive final answer grounded in gathered evidence, or call another tool.'})
+                continue
             missing = require_any_before_final - called_tools
             if require_any_before_final and missing == require_any_before_final:
                 if verbose:
@@ -125,7 +145,7 @@ def run_agent(llm: OllamaClient, tools: dict[str, Tool], task_intro: str, task: 
                     ),
                 })
                 continue
-            return _format_final_answer(parsed["final_answer"])
+            return answer
 
         action = parsed.get("action")
         args = parsed.get("args", {}) or {}
