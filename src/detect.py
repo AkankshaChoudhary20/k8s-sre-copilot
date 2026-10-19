@@ -26,6 +26,10 @@ def _container_findings(pod_name: str, container_statuses: list[dict]) -> list[d
         terminated = state.get("terminated")
         ready = cs.get("ready", False)
 
+        # Completed init containers and Jobs are not readiness failures.
+        if terminated and terminated.get("exitCode") == 0:
+            continue
+
         if waiting and waiting.get("reason") in CRITICAL_WAITING_REASONS:
             findings.append({
                 "pod": pod_name, "container": name, "severity": "critical",
@@ -90,6 +94,7 @@ def classify_pod(pod: dict) -> list[dict]:
                 ),
             })
 
+    findings.extend(_container_findings(pod_name, status.get("initContainerStatuses")))
     findings.extend(_container_findings(pod_name, status.get("containerStatuses")))
     return findings
 
@@ -101,3 +106,4 @@ def detect(pods: list[dict]) -> list[dict]:
         findings.extend(classify_pod(pod))
     findings.sort(key=lambda f: SEVERITY_ORDER[f["severity"]], reverse=True)
     return findings
+
