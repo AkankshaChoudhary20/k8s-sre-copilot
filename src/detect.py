@@ -79,19 +79,16 @@ def classify_pod(pod: dict) -> list[dict]:
     findings = []
 
     if phase == "Pending":
-        conditions = status.get("conditions", [])
-        unschedulable = any(
-            c.get("type") == "PodScheduled" and c.get("status") == "False"
-            for c in conditions
+        conditions = status.get("conditions") or []
+        unschedulable = next(
+            (c for c in conditions if c.get("type") == "PodScheduled" and c.get("status") == "False"),
+            None,
         )
-        if unschedulable:
+        if unschedulable is not None:
             findings.append({
                 "pod": pod_name, "container": None, "severity": "high",
                 "reason": "Unschedulable",
-                "detail": next(
-                    (c.get("message", "") for c in conditions if c.get("type") == "PodScheduled"),
-                    "",
-                ),
+                "detail": unschedulable.get("message", ""),
             })
 
     findings.extend(_container_findings(pod_name, status.get("initContainerStatuses")))
